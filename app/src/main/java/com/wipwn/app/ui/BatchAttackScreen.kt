@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -68,7 +69,7 @@ fun BatchAttackContent(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Kembali")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Kembali")
                     }
                 },
                 actions = {
@@ -456,7 +457,7 @@ private fun SummaryCard(uiState: BatchUiState) {
                 }
             }
             if (uiState.finished && uiState.successCount > 0) {
-                Divider(color = OnSurfaceVariantDark.copy(alpha = 0.2f))
+                HorizontalDivider(color = OnSurfaceVariantDark.copy(alpha = 0.2f))
                 Text(
                     "Credential yang ketemu:",
                     style = MaterialTheme.typography.labelMedium,

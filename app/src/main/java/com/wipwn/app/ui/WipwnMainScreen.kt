@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.wipwn.app.BuildConfig
 import com.wipwn.app.data.AttackType
 import com.wipwn.app.data.WifiNetwork
 import com.wipwn.app.ui.theme.*
@@ -436,7 +437,7 @@ private fun HomeContent(
             Spacer(modifier = Modifier.height(24.dp))
 
             Text(
-                text = "v2.0.0 — Hanya untuk pengujian yang diizinkan",
+                text = "v${BuildConfig.VERSION_NAME} — Hanya untuk pengujian yang diizinkan",
                 style = MaterialTheme.typography.labelSmall,
                 color = OnSurfaceVariantDark.copy(alpha = 0.5f)
             )
