@@ -173,6 +173,14 @@ object NetworkSecurityAnalyzer {
     }
 
     private fun fingerprintFromBssid(bssid: String): RouterFingerprint {
+        return fingerprintFromBssidPublic(bssid)
+    }
+
+    /**
+     * Public version — used by PinGenerator and VulnerabilityAssessor
+     * to get vendor info from BSSID.
+     */
+    fun fingerprintFromBssidPublic(bssid: String): RouterFingerprint {
         val oui = bssid
             .split(":")
             .take(3)
@@ -213,6 +221,11 @@ object NetworkSecurityAnalyzer {
                 "Disable remote management from WAN"
             )
         ),
+        "50:C7:BF" to VendorInfo(
+            vendor = "TP-Link",
+            modelFamily = "TL-WR series (possible)",
+            checklist = listOf("Disable WPS", "Update firmware", "Change default admin password")
+        ),
         "F4:F2:6D" to VendorInfo(
             vendor = "ASUS",
             modelFamily = "RT series (possible)",
@@ -239,7 +252,26 @@ object NetworkSecurityAnalyzer {
                 "Disable open management networks",
                 "Rotate admin credentials periodically"
             )
-        )
+        ),
+        // Extended OUI database
+        "1C:B7:2C" to VendorInfo("D-Link", "DIR series (possible)", listOf("Disable WPS", "Update firmware")),
+        "28:10:7B" to VendorInfo("D-Link", "DIR series (possible)", listOf("Disable WPS", "Update firmware")),
+        "00:26:5A" to VendorInfo("D-Link", null, listOf("Disable WPS", "Update firmware")),
+        "C8:3A:35" to VendorInfo("Tenda", null, listOf("Disable WPS", "Change default password")),
+        "08:10:79" to VendorInfo("ZTE", null, listOf("Disable WPS", "Change default PIN")),
+        "E0:19:1D" to VendorInfo("Huawei", null, listOf("Disable WPS", "Update firmware")),
+        "48:8D:36" to VendorInfo("Huawei", null, listOf("Disable WPS", "Update firmware")),
+        "20:F3:A3" to VendorInfo("Huawei", null, listOf("Disable WPS", "Update firmware")),
+        "C0:25:E9" to VendorInfo("TP-Link", null, listOf("Disable WPS", "Update firmware")),
+        "B0:BE:76" to VendorInfo("TP-Link", null, listOf("Disable WPS", "Update firmware")),
+        "60:E3:27" to VendorInfo("TP-Link", null, listOf("Disable WPS", "Update firmware")),
+        "30:B5:C2" to VendorInfo("TP-Link", null, listOf("Disable WPS", "Update firmware")),
+        "E4:F4:C6" to VendorInfo("Netgear", null, listOf("Disable WPS", "Update firmware")),
+        "A4:2B:8C" to VendorInfo("Netgear", null, listOf("Disable WPS", "Update firmware")),
+        "C4:04:15" to VendorInfo("Belkin", null, listOf("Disable WPS", "Update firmware")),
+        "08:86:3B" to VendorInfo("Belkin", null, listOf("Disable WPS", "Update firmware")),
+        "58:6D:8F" to VendorInfo("Cisco/Linksys", null, listOf("Disable WPS", "Update firmware")),
+        "C0:56:27" to VendorInfo("Belkin", null, listOf("Disable WPS", "Update firmware"))
     )
 }
 

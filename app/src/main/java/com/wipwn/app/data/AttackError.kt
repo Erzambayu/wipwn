@@ -21,6 +21,21 @@ sealed class AttackError(open val message: String) {
     /** Device is not rooted or user denied the SU prompt. */
     data class NoRoot(override val message: String = "Tidak ada akses root") : AttackError(message)
 
+    /** Rate-limited by router — too many attempts. */
+    data class RateLimited(override val message: String = "Rate-limit: terlalu banyak percobaan") : AttackError(message)
+
+    /** Monitor mode failed — can't set interface. */
+    data class MonitorModeFailed(override val message: String = "Gagal aktifkan monitor mode") : AttackError(message)
+
+    /** Required tool/binary not found. */
+    data class ToolNotFound(override val message: String, val toolName: String = "") : AttackError(message)
+
+    /** Handshake capture failed. */
+    data class CaptureFailed(override val message: String = "Gagal capture handshake") : AttackError(message)
+
+    /** MAC spoofing failed. */
+    data class MacSpoofFailed(override val message: String = "Gagal spoof MAC address") : AttackError(message)
+
     /** Unknown runtime failure, carry the original message/exception. */
     data class Unknown(override val message: String, val cause: Throwable? = null) : AttackError(message)
 

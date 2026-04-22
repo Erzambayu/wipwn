@@ -28,13 +28,26 @@ data class WifiNetwork(
 enum class SignalLevel { EXCELLENT, GOOD, FAIR, WEAK }
 
 /**
- * Type of WPS attack to perform.
+ * Type of attack to perform.
  */
-enum class AttackType(val displayName: String) {
+enum class AttackType(val displayName: String, val category: AttackCategory = AttackCategory.WPS) {
     KNOWN_PINS("Test Known PINs"),
     PIXIE_DUST("Pixie Dust Attack"),
     BRUTE_FORCE("Brute Force"),
-    CUSTOM_PIN("Custom PIN")
+    CUSTOM_PIN("Custom PIN"),
+    ALGORITHMIC_PIN("Algorithmic PIN"),
+    NULL_PIN("Null PIN Attack"),
+    DEAUTH("Deauthentication", AttackCategory.WIFI),
+    HANDSHAKE_CAPTURE("Handshake Capture", AttackCategory.WIFI),
+    PMKID("PMKID Attack", AttackCategory.WIFI),
+    EVIL_TWIN("Evil Twin AP", AttackCategory.WIFI),
+    RECON("Network Recon", AttackCategory.POST_EXPLOIT)
+}
+
+enum class AttackCategory(val label: String) {
+    WPS("WPS Attacks"),
+    WIFI("WiFi Attacks"),
+    POST_EXPLOIT("Post-Exploit")
 }
 
 /**
@@ -44,7 +57,26 @@ enum class AttackType(val displayName: String) {
 data class AttackConfig(
     val bruteForceDelayMs: Int = 1000,
     val attackTimeoutMs: Long = 120_000L,
-    val knownPins: List<String> = DEFAULT_KNOWN_PINS
+    val knownPins: List<String> = DEFAULT_KNOWN_PINS,
+    // MAC Spoofing
+    val macSpoofEnabled: Boolean = false,
+    val macSpoofTarget: String? = null, // null = random
+    // Rate-limit bypass
+    val rateLimitBypass: Boolean = true,
+    val rateLimitCooldownMs: Long = 60_000L,
+    val rateLimitMaxRetries: Int = 3,
+    // Deauth
+    val deauthCount: Int = 10,
+    val deauthTargetClient: String? = null,
+    // Handshake / PMKID
+    val captureTimeoutSec: Int = 30,
+    val wordlistPath: String? = null,
+    // Evil Twin
+    val evilTwinChannel: Int = 6,
+    val evilTwinCaptivePortal: Boolean = true,
+    // Recon
+    val reconPortScan: Boolean = true,
+    val reconDefaultCreds: Boolean = true
 ) {
     companion object {
         val DEFAULT_KNOWN_PINS: List<String> = listOf(
@@ -68,7 +100,13 @@ data class AttackResult(
     val password: String? = null,
     val success: Boolean = false,
     val error: AttackError? = null,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val attackType: AttackType? = null,
+    // Extra data for advanced attacks
+    val captureFile: String? = null,
+    val reconData: String? = null,
+    val macUsed: String? = null,
+    val algorithmUsed: String? = null
 ) {
     val errorMessage: String? get() = error?.message
 }

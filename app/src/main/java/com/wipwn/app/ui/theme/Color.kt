@@ -39,3 +39,15 @@ val SignalExcellent = GreenAccent
 val SignalGood = Green400
 val SignalFair = Yellow400
 val SignalWeak = Red400
+
+// Vulnerability levels
+val VulnCritical = Red400
+val VulnHigh = Orange400
+val VulnMedium = Yellow400
+val VulnLow = GreenAccent
+val VulnUnknown = Color(0xFF8B949E)
+
+// Tool accents
+val Purple400 = Color(0xFFAB47BC)
+val Pink400 = Color(0xFFEC407A)
+val Teal400 = Color(0xFF26A69A)

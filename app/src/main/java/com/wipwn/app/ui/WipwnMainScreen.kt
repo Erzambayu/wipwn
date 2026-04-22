@@ -38,6 +38,7 @@ import com.wipwn.app.viewmodel.BatchAttackViewModel
 import com.wipwn.app.viewmodel.MainViewModel
 import com.wipwn.app.viewmodel.ResultsViewModel
 import com.wipwn.app.viewmodel.ScanViewModel
+import com.wipwn.app.viewmodel.ToolsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,7 +47,8 @@ fun WipwnMainScreen(
     scanVm: ScanViewModel = viewModel(),
     attackVm: AttackViewModel = viewModel(),
     resultsVm: ResultsViewModel = viewModel(),
-    batchVm: BatchAttackViewModel = viewModel()
+    batchVm: BatchAttackViewModel = viewModel(),
+    toolsVm: ToolsViewModel = viewModel()
 ) {
     val initState by mainVm.initState.collectAsStateWithLifecycle()
     val scanState by scanVm.state.collectAsStateWithLifecycle()
@@ -54,6 +56,10 @@ fun WipwnMainScreen(
     val selectedNetwork by attackVm.selectedNetwork.collectAsStateWithLifecycle()
     val results by resultsVm.results.collectAsStateWithLifecycle()
     val batchState by batchVm.state.collectAsStateWithLifecycle()
+    val macState by toolsVm.macState.collectAsStateWithLifecycle()
+    val vulnState by toolsVm.vulnState.collectAsStateWithLifecycle()
+    val reconState by toolsVm.reconState.collectAsStateWithLifecycle()
+    val advancedState by toolsVm.advancedState.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
 
     var currentScreen by remember { mutableStateOf("home") }
@@ -82,6 +88,10 @@ fun WipwnMainScreen(
                     currentScreen = "home"
                     true
                 }
+            }
+            "tools" -> {
+                currentScreen = "home"
+                true
             }
             "scan", "results" -> {
                 currentScreen = "home"
@@ -114,7 +124,8 @@ fun WipwnMainScreen(
             onRetry = { mainVm.retry() },
             onGoScan = { currentScreen = "scan" },
             onGoResults = { currentScreen = "results" },
-            onGoBatch = { currentScreen = "batch" }
+            onGoBatch = { currentScreen = "batch" },
+            onGoTools = { currentScreen = "tools" }
         )
         "scan" -> ScanContent(
             networks = scanState.networks,
@@ -162,6 +173,33 @@ fun WipwnMainScreen(
                 if (!batchState.isRunning) currentScreen = "home"
             }
         )
+        "tools" -> ToolsContent(
+            network = selectedNetwork,
+            macState = macState,
+            vulnState = vulnState,
+            reconState = reconState,
+            advancedState = advancedState,
+            results = results,
+            scannedNetworks = scanState.networks,
+            isScanning = scanState.isScanning,
+            onScan = { scanVm.scan() },
+            onSelectTarget = { net ->
+                scanVm.select(net)
+                toolsVm.selectTarget(net)
+            },
+            onSpoofMac = { toolsVm.spoofMac(it) },
+            onRestoreMac = { toolsVm.restoreMac() },
+            onRefreshMac = { toolsVm.refreshMac() },
+            onAssessNetwork = { toolsVm.assessNetwork(it) },
+            onRunAdvancedAttack = { net, type, config -> toolsVm.runAdvancedAttack(net, type, config) },
+            onStopEvilTwin = { toolsVm.stopEvilTwin() },
+            onStopDeauth = { toolsVm.stopDeauth() },
+            onCancelAdvanced = { toolsVm.cancelAdvanced() },
+            onQuickRecon = { toolsVm.quickRecon() },
+            onExport = { res, fmt -> toolsVm.exportResults(res, fmt) },
+            onFormatClipboard = { toolsVm.formatForClipboard(it) },
+            onBack = { currentScreen = "home" }
+        )
     }
 }
 
@@ -180,7 +218,8 @@ private fun HomeContent(
     onRetry: () -> Unit,
     onGoScan: () -> Unit,
     onGoResults: () -> Unit,
-    onGoBatch: () -> Unit
+    onGoBatch: () -> Unit,
+    onGoTools: () -> Unit
 ) {
     val scrollState = rememberScrollState()
 
@@ -405,6 +444,37 @@ private fun HomeContent(
                 Icon(Icons.Filled.History, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Riwayat ($resultCount)")
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Advanced Tools button
+            OutlinedButton(
+                onClick = onGoTools,
+                enabled = isReady,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Orange400,
+                    disabledContentColor = Orange400.copy(alpha = 0.4f)
+                )
+            ) {
+                Icon(Icons.Filled.Build, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(horizontalAlignment = Alignment.Start) {
+                    Text(
+                        "Advanced Tools",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "MAC Spoof, Deauth, PMKID, Evil Twin, Recon",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OnSurfaceVariantDark
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(32.dp))

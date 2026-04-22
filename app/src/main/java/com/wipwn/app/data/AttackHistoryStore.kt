@@ -56,6 +56,11 @@ class AttackHistoryStore(private val context: Context) {
                     put("error", r.error?.message ?: JSONObject.NULL)
                     put("errorType", r.error?.let(::errorTypeTag) ?: JSONObject.NULL)
                     put("timestamp", r.timestamp)
+                    put("attackType", r.attackType?.name ?: JSONObject.NULL)
+                    put("captureFile", r.captureFile ?: JSONObject.NULL)
+                    put("reconData", r.reconData ?: JSONObject.NULL)
+                    put("macUsed", r.macUsed ?: JSONObject.NULL)
+                    put("algorithmUsed", r.algorithmUsed ?: JSONObject.NULL)
                 }
             )
         }
@@ -77,7 +82,14 @@ class AttackHistoryStore(private val context: Context) {
                         password = o.optString("password").takeIf { !o.isNull("password") },
                         success = o.getBoolean("success"),
                         error = errMsg?.let { decodeError(errTag, it) },
-                        timestamp = o.optLong("timestamp", System.currentTimeMillis())
+                        timestamp = o.optLong("timestamp", System.currentTimeMillis()),
+                        attackType = o.optString("attackType").takeIf { !o.isNull("attackType") }?.let {
+                            runCatching { AttackType.valueOf(it) }.getOrNull()
+                        },
+                        captureFile = o.optString("captureFile").takeIf { !o.isNull("captureFile") },
+                        reconData = o.optString("reconData").takeIf { !o.isNull("reconData") },
+                        macUsed = o.optString("macUsed").takeIf { !o.isNull("macUsed") },
+                        algorithmUsed = o.optString("algorithmUsed").takeIf { !o.isNull("algorithmUsed") }
                     )
                 )
             }
@@ -90,6 +102,11 @@ class AttackHistoryStore(private val context: Context) {
         is AttackError.PixieDustNotVulnerable -> "pixie"
         is AttackError.EnvironmentFailed -> "env"
         is AttackError.NoRoot -> "noroot"
+        is AttackError.RateLimited -> "ratelimit"
+        is AttackError.MonitorModeFailed -> "monitor"
+        is AttackError.ToolNotFound -> "toolnotfound"
+        is AttackError.CaptureFailed -> "capture"
+        is AttackError.MacSpoofFailed -> "macspoof"
         is AttackError.Unknown -> "unknown"
     }
 
@@ -99,6 +116,11 @@ class AttackHistoryStore(private val context: Context) {
         "pixie" -> AttackError.PixieDustNotVulnerable(msg)
         "env" -> AttackError.EnvironmentFailed(msg)
         "noroot" -> AttackError.NoRoot(msg)
+        "ratelimit" -> AttackError.RateLimited(msg)
+        "monitor" -> AttackError.MonitorModeFailed(msg)
+        "toolnotfound" -> AttackError.ToolNotFound(msg)
+        "capture" -> AttackError.CaptureFailed(msg)
+        "macspoof" -> AttackError.MacSpoofFailed(msg)
         else -> AttackError.Unknown(msg)
     }
 

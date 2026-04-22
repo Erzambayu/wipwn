@@ -280,6 +280,26 @@ fun AttackContent(
                     )
                 }
 
+                item {
+                    AttackOptionCard(
+                        title = "Algorithmic PIN",
+                        description = "Generate & test PIN berdasarkan BSSID + vendor algorithm",
+                        icon = Icons.Filled.Calculate,
+                        accentColor = Cyan400,
+                        onClick = { onStartAttack(AttackType.ALGORITHMIC_PIN, null) }
+                    )
+                }
+
+                item {
+                    AttackOptionCard(
+                        title = "Null PIN Attack",
+                        description = "Test empty/null PIN variants (beberapa router accept)",
+                        icon = Icons.Filled.RemoveCircle,
+                        accentColor = OnSurfaceVariantDark,
+                        onClick = { onStartAttack(AttackType.NULL_PIN, null) }
+                    )
+                }
+
                 // Custom PIN
                 item {
                     Card(
